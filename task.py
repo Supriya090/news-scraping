@@ -1,68 +1,64 @@
-import sys
+import json
 import requests
 import sqlite3
-import math
 
-# creating and connecting to annapurna db
-connection = sqlite3.connect("annapurna.db")
-print(connection.total_changes)
-
-# creating a cursor
-cursor = connection.cursor()
-cursor.execute(
-    "CREATE TABLE IF NOT EXISTS news (searchTerm STRING, page_number INTEGER)")
-
-
-# getting news with user-specified search term
-searchTerm = input("Enter the term you want to search: ")
-url = "https://bg.annapurnapost.com/api/search"
-params = dict(
-    title=searchTerm,
-)
-resp = requests.get(url=url, params=params)
-data = resp.json()
-
-
-# getting total number of pages
-total = data['data']['total']
-count = data['data']['count']
-print("Total number of articles of the search term \"",
-      searchTerm, "\" is : ", total)
-if(total == 0):
-    print("No article with the given search term exists")
-    sys.exit()
-pages = math.ceil(total/count)
-
-currentPage = 0
+# making the API request
+def searchJSON(searchTerm, url, pageNum):
+    params = dict(
+        title=searchTerm,
+        page=pageNum
+    )
+    resp = requests.get(url=url, params=params)
+    data = resp.json()
+    return data
 
 
 # getting the latest page_number based on the search term
-searchRows = cursor.execute(
-    "SELECT searchTerm, page_number FROM news").fetchall()
-if(len(searchRows) != 0):
-    currentTerm = searchRows[-1][0]
-    if(str(currentTerm) != searchTerm):
-        currentPage = 0
-    else:
-        currentPage = searchRows[-1][1]
-
-print(currentPage)
-
-if (currentPage == pages):
-    print("All articles displayed")
+def getCurrentPage(searchRows, searchTerm):
+    currentPage = 0
+    if(len(searchRows) != 0):
+        currentTerm = searchRows[-1][0]
+        if(str(currentTerm) != searchTerm):
+            currentPage = 0
+        else:
+            currentPage = searchRows[-1][1]
+    print("Current Page: ", currentPage)
+    return currentPage
 
 
-# pagination
-for i in range(currentPage, pages):
-    pageParams = dict(
-        title=searchTerm,
-        page=i+1
-    )
-    eachResp = requests.get(url=url, params=pageParams)
-    eachData = eachResp.json()
-    # storing page_number after each response
-    cursor.execute("INSERT INTO news (searchTerm, page_number) VALUES (?, ?)",
-                   (searchTerm, i+1,))
-    connection.commit()
-    print(eachData)
-    print("\n\n\n")
+def main():
+    # creating and connecting to annapurna db
+    connection = sqlite3.connect("annapurna.db")
+    if (connection.total_changes == 0):
+        print("DB Connected")
+
+    # creating a cursor
+    cursor = connection.cursor()
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS news (searchTerm STRING, JSON TEXT, page_number INTEGER)")
+
+    # getting news with user-specified search term
+    searchTerm = input("Enter the term you want to search: ")
+    searchRows = cursor.execute(
+        "SELECT searchTerm, page_number FROM news").fetchall()
+    currentPage = getCurrentPage(searchRows, searchTerm)
+    pages = currentPage + 1     # just for making the first loop
+
+    # pagination
+    url = "https://bg.annapurnapost.com/api/search"
+    i = currentPage
+    while i <= pages:
+        eachData = searchJSON(searchTerm, url, i+1)
+        if(i == currentPage):
+            pages = eachData['data']['totalPage']
+        # storing page_number after each response
+        cursor.execute("INSERT INTO news (searchTerm, JSON, page_number) VALUES (?, ?, ?)",
+                       (searchTerm, json.dumps(eachData), i+1,))
+        connection.commit()
+        print(eachData)
+        print("\n\n\n")
+        i += 1
+
+
+if __name__ == "__main__":
+    main()
